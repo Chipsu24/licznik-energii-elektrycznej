@@ -1,0 +1,157 @@
+esphome:
+  name: licznik-energii-elektrycznej
+  friendly_name: Licznik Energii Elektrycznej
+
+esp8266:
+  board: esp01_1m
+
+# Enable logging
+logger:
+  level: DEBUG
+  logs:
+    light: WARN
+  on_message:
+    level: WARN
+    then:
+        - light.turn_on:
+            id: joker_tusk
+        - delay: 1s
+        - light.turn_off:
+            id: joker_tusk    
+
+     
+# Enable Home Assistant API
+api:
+  encryption:
+    key: "NlsiRUWvvWE91svLO3/k4eyhyr5zrdOkKoC9QhQGyd8="
+  services:
+    - service: reset_total_energy
+      then:
+        - button.press:
+            id: button_reset_total            
+
+ota:
+  password: "5a0d3c8ce3e0526ad1676866ea6ebf94"
+  platform: esphome
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: "Licznik-Energii-Elektrycznej"
+    password: "19922991"
+
+captive_portal:
+    
+web_server:
+
+number:
+  - platform: template
+    id: select_reset_total
+    name: 'Zresetuj wartość - Energia sumaryczna'
+    entity_category: config
+    optimistic: true
+    mode: box
+    min_value: 0
+    max_value: 1000000
+    step: 1
+    initial_value: 0
+  
+light:
+  - platform: binary
+    name: "Dioda Czerwona"
+    id: joker_tusk
+    output: dioda_czerwona
+    internal: true
+  - platform: binary
+    name: "Dioda zielona"
+    id: green_bastard
+    output: dioda_zielona
+    internal: true
+
+
+output:
+  - id: dioda_czerwona
+    platform: gpio
+    pin: GPIO5
+  - id: dioda_zielona
+    platform: gpio
+    pin: GPIO4
+
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      name: 'IP'
+      icon: mdi:wifi
+    ssid:
+      name: 'Nazwa sieci'
+      icon: mdi:wifi-strength-2
+
+button:
+  - platform: restart
+    name: "Restart"
+  - platform: template
+    name: "Energia całkowita"
+    id: button_reset_total
+    on_press:
+      - pulse_meter.set_total_pulses:
+          id: sensor_pulse_meter
+          value: !lambda "return id(select_reset_total).state * 2500;"
+
+
+sensor:
+  - platform: pulse_meter
+    name: 'Moc'
+    id: sensor_pulse_meter # Optional ID, necessary if you want to calculate the total daily energy
+    unit_of_measurement: 'W'
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 0
+    pin: GPIO13
+    icon: mdi:home-lightning-bolt
+    filters:
+      - multiply: 24 # (60s / impulse constant) * (1000W / 1kW)
+      - throttle_average: 10s
+      - filter_out: NaN     
+    on_raw_value:
+      then:
+        - light.turn_on:
+            id: green_bastard
+        - delay: 0.2s
+        - light.turn_off:
+            id: green_bastard
+
+    total:
+      name: "Energia sumaryczna"
+      unit_of_measurement: "kWh"
+      device_class: energy
+      state_class: total_increasing
+      accuracy_decimals: 3
+      icon: mdi:meter_electric
+      filters:
+        - multiply: 0.0004  # (1/10000 pulses per kWh)
+        - throttle_average: 10s
+        - filter_out: NaN
+
+  - platform: total_daily_energy
+    name: 'Energia Dzienna'
+    id: sensor_total_daily_energy
+    power_id: sensor_pulse_meter
+    unit_of_measurement: 'kWh'
+    state_class: total_increasing
+    device_class: energy
+    accuracy_decimals: 3
+    icon: mdi:counter
+    filters:
+      # Multiplication factor from W to kW is 0.001
+      - multiply: 0.001
+
+  - platform: wifi_signal
+    name: "Sygnał WiFi"
+    update_interval: 120s
+
+time:
+  - platform: homeassistant
+    id: homeassistant_time
